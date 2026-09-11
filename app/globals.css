@@ -11,7 +11,7 @@ body {
 }
 
 ::selection {
-  @apply bg-zinc-900 text-white;
+  @apply bg-brand-600 text-white;
 }
 
 .transcript-body {
@@ -33,4 +33,26 @@ body {
 
 .toast-in {
   animation: toast-in 0.18s ease-out;
+}
+
+/* Scroll reveal (used with <Reveal/>). Disabled for reduced motion. */
+.reveal {
+  opacity: 0;
+  transform: translateY(18px);
+  transition:
+    opacity 0.6s ease,
+    transform 0.6s ease;
+}
+
+.reveal-shown {
+  opacity: 1;
+  transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reveal {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
 }

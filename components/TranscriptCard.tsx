@@ -59,7 +59,7 @@ export default function TranscriptCard({
           {new Date(transcript.createdAt).toLocaleDateString()}
         </p>
       </div>
-      <span className="inline-flex shrink-0 items-center gap-1.5 rounded-xl bg-zinc-100 px-3 py-2 text-xs font-semibold text-zinc-600 transition group-hover:bg-zinc-900 group-hover:text-white">
+      <span className="inline-flex shrink-0 items-center gap-1.5 rounded-xl bg-zinc-100 px-3 py-2 text-xs font-semibold text-zinc-600 transition group-hover:bg-primary group-hover:text-white">
         <BookOpen className="h-3.5 w-3.5" />
         Read
       </span>

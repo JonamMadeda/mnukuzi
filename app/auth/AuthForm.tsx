@@ -11,7 +11,7 @@ function SubmitButton({ label, pendingLabel }: { label: string; pendingLabel: st
     <button
       type="submit"
       disabled={pending}
-      className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-zinc-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-zinc-700 disabled:opacity-50"
+      className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-primary-light disabled:opacity-50"
     >
       {pending && <Loader2 className="h-4 w-4 animate-spin" />}
       {pending ? pendingLabel : label}
@@ -33,7 +33,7 @@ export default function AuthForm({
     <main className="flex min-h-[70vh] items-center justify-center pt-10">
       <div className="w-full max-w-md rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm sm:p-8">
         <div className="flex items-center gap-3">
-          <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-zinc-900 text-white">
+          <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-primary text-white">
             <Youtube className="h-6 w-6" />
           </div>
           <div>
@@ -55,7 +55,7 @@ export default function AuthForm({
               placeholder="Name"
               autoComplete="name"
               maxLength={100}
-              className="w-full rounded-xl border border-zinc-200 bg-white px-3.5 py-2.5 text-sm outline-none placeholder:text-zinc-400 focus:border-zinc-900 focus:ring-2 focus:ring-zinc-900/10"
+              className="w-full rounded-xl border border-zinc-200 bg-white px-3.5 py-2.5 text-sm outline-none placeholder:text-zinc-400 focus:border-brand-600 focus:ring-2 focus:ring-brand-600/20"
             />
           )}
           <input
@@ -64,7 +64,7 @@ export default function AuthForm({
             placeholder="Email"
             autoComplete="email"
             required
-            className="w-full rounded-xl border border-zinc-200 bg-white px-3.5 py-2.5 text-sm outline-none placeholder:text-zinc-400 focus:border-zinc-900 focus:ring-2 focus:ring-zinc-900/10"
+            className="w-full rounded-xl border border-zinc-200 bg-white px-3.5 py-2.5 text-sm outline-none placeholder:text-zinc-400 focus:border-brand-600 focus:ring-2 focus:ring-brand-600/20"
           />
           <input
             name="password"
@@ -73,7 +73,7 @@ export default function AuthForm({
             autoComplete={isSignUp ? "new-password" : "current-password"}
             minLength={8}
             required
-            className="w-full rounded-xl border border-zinc-200 bg-white px-3.5 py-2.5 text-sm outline-none placeholder:text-zinc-400 focus:border-zinc-900 focus:ring-2 focus:ring-zinc-900/10"
+            className="w-full rounded-xl border border-zinc-200 bg-white px-3.5 py-2.5 text-sm outline-none placeholder:text-zinc-400 focus:border-brand-600 focus:ring-2 focus:ring-brand-600/20"
           />
           {state.error && (
             <p className="rounded-xl bg-red-50 px-3.5 py-2.5 text-sm font-medium text-red-700">

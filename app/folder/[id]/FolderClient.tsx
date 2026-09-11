@@ -76,7 +76,7 @@ function FolderView({
       </Link>
 
       <div className="mt-5 flex items-start gap-3">
-        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-zinc-900 text-white">
+        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-primary text-white">
           <FolderOpen className="h-6 w-6" />
         </div>
         <div className="min-w-0 flex-1">

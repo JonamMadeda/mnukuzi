@@ -16,9 +16,9 @@ datasource db {
 model Document {
   id         String       @id @default(cuid())
   title      String
-  // Owner from Neon Auth (Better Auth user id). Nullable so pre-auth
-  // folders keep working; all new folders are stamped in Server Actions.
-  userId     String?
+  // Owner from Neon Auth (Better Auth user id). Required: every folder
+  // always belongs to exactly one account — no ownerless rows possible.
+  userId     String
   createdAt  DateTime     @default(now())
   updatedAt  DateTime     @updatedAt
   transcripts Transcript[]

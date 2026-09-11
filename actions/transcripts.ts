@@ -33,7 +33,7 @@ export async function createDocument(title: string) {
   const clean = title.trim().slice(0, 120);
   if (!clean) return { ok: false as const, error: "Title is required." };
   const doc = await prisma.document.create({ data: { title: clean, userId: user.id } });
-  revalidatePath("/");
+  revalidatePath("/console");
   return { ok: true as const, data: doc };
 }
 
@@ -44,7 +44,7 @@ export async function deleteDocument(id: string) {
   const { error, user } = await requireUser();
   if (error || !user) return { ok: false as const, error };
   await prisma.document.deleteMany({ where: { id, userId: user.id } });
-  revalidatePath("/");
+  revalidatePath("/console");
   return { ok: true as const, data: null };
 }
 

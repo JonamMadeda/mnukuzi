@@ -4,6 +4,6 @@ import { signInWithEmail } from "./actions";
 import { getSessionUser } from "@/lib/auth/server";
 
 export default async function SignInPage() {
-  if (await getSessionUser()) redirect("/");
+  if (await getSessionUser()) redirect("/console");
   return <AuthForm mode="sign-in" action={signInWithEmail} />;
 }
