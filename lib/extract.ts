@@ -22,6 +22,175 @@ export type ExtractResult = {
   paragraphs: string[];
 };
 
+const FETCH_TIMEOUT_MS = 12000;
+
+// Public embedded API key used by YouTube's own clients. Not a secret.
+const INNERTUBE_KEY = "AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8";
+
+function withTimeout(): AbortSignal {
+  return AbortSignal.timeout(FETCH_TIMEOUT_MS);
+}
+
+function stripTags(s: string): string {
+  return s
+    .replace(/<[^>]*>/g, "")
+    .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(Number(code)))
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, code) => String.fromCharCode(parseInt(code, 16)))
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function vttTimestampToMs(t: string): number {
+  const parts = t.trim().split(":");
+  let h = 0;
+  let m = 0;
+  let s = 0;
+  if (parts.length === 3) {
+    h = Number(parts[0]);
+    m = Number(parts[1]);
+    s = Number(parts[2].replace(",", "."));
+  } else if (parts.length === 2) {
+    m = Number(parts[0]);
+    s = Number(parts[1].replace(",", "."));
+  }
+  return Math.round((h * 3600 + m * 60 + s) * 1000);
+}
+
+function parseVtt(vtt: string): CaptionItem[] {
+  const out: CaptionItem[] = [];
+  const blocks = vtt.replace(/\r/g, "").split("\n\n");
+  for (const block of blocks) {
+    const lines = block.split("\n").map((l) => l.trim()).filter(Boolean);
+    if (!lines.length || lines[0] === "WEBVTT") continue;
+    // Cue header may be lines[0] or lines[1] (when a cue id precedes it).
+    const headIdx = lines.findIndex((l) => l.includes("-->"));
+    if (headIdx === -1) continue;
+    const [startRaw, endRaw] = lines[headIdx].split("-->").map((s) => s.trim());
+    const start = vttTimestampToMs(startRaw.split(" ")[0]);
+    const end = vttTimestampToMs((endRaw ?? "").split(" ")[0]);
+    const text = lines
+      .slice(headIdx + 1)
+      .map(stripTags)
+      .filter(Boolean)
+      .join(" ");
+    if (text) out.push({ text, offset: start, duration: Math.max(0, end - start) });
+  }
+  return out;
+}
+
+function parseSrv3(xml: string): CaptionItem[] {
+  const out: CaptionItem[] = [];
+  // Variant A: <text start="12.34" dur="5.67"> (seconds, float)
+  const textRe = /<text start="([\d.]+)" dur="([\d.]+)"[^>]*>([\s\S]*?)<\/text>/g;
+  let m: RegExpExecArray | null;
+  while ((m = textRe.exec(xml)) !== null) {
+    const text = stripTags(m[3]);
+    if (text) {
+      out.push({
+        text,
+        offset: Math.round(Number(m[1]) * 1000),
+        duration: Math.round(Number(m[2]) * 1000),
+      });
+    }
+  }
+  if (out.length) return out;
+  // Variant B: <p t="1360" d="1680"> (milliseconds, int)
+  const pRe = /<p t="(\d+)" d="(\d+)"[^>]*>([\s\S]*?)<\/p>/g;
+  while ((m = pRe.exec(xml)) !== null) {
+    const text = stripTags(m[3]);
+    if (text) {
+      out.push({ text, offset: Number(m[1]), duration: Number(m[2]) });
+    }
+  }
+  return out;
+}
+
+/**
+ * Fallback caption fetch via YouTube's InnerTube Player API.
+ * Unlike watch-page HTML scraping, this endpoint generally still returns
+ * caption tracks from cloud/datacenter IPs (e.g. Vercel) where the
+ * `youtube-transcript` scraper gets a bot-check page with no tracks.
+ */
+async function fetchCaptionsInnerTube(videoId: string): Promise<CaptionItem[]> {
+  const playerRes = await fetch(
+    `https://www.youtube.com/youtubei/v1/player?key=${INNERTUBE_KEY}`,
+    {
+      method: "POST",
+      signal: withTimeout(),
+      headers: {
+        "Content-Type": "application/json",
+        "User-Agent":
+          "com.google.android.youtube/20.10.38 (Linux; U; Android 13; en_US)",
+        "X-Youtube-Client-Name": "3",
+        "X-Youtube-Client-Version": "20.10.38",
+      },
+      body: JSON.stringify({
+        context: {
+          client: {
+            clientName: "ANDROID",
+            clientVersion: "20.10.38",
+            androidSdkVersion: 33,
+            hl: "en",
+            gl: "US",
+          },
+        },
+        videoId,
+      }),
+    }
+  );
+  if (!playerRes.ok) throw new Error(`player API ${playerRes.status}`);
+
+  const player = (await playerRes.json()) as {
+    captions?: {
+      playerCaptionsTracklistRenderer?: {
+        captionTracks?: {
+          baseUrl: string;
+          languageCode?: string;
+          kind?: string;
+        }[];
+      };
+    };
+  };
+  const tracks =
+    player.captions?.playerCaptionsTracklistRenderer?.captionTracks ?? [];
+  if (!tracks.length) throw new Error("no caption tracks in player response");
+
+  const ranked = [...tracks].sort((a, b) => score(a) - score(b));
+  function score(t: { languageCode?: string; kind?: string }): number {
+    let s = 10;
+    if ((t.languageCode ?? "").startsWith("en")) s -= 5;
+    if (!t.kind || t.kind !== "asr") s -= 2; // prefer manual over auto
+    return s;
+  }
+
+  let lastErr: unknown = null;
+  for (const track of ranked.slice(0, 3)) {
+    try {
+      // One download per track: try VTT first, then srv3 XML on the same
+      // body (the server often ignores `fmt` and returns srv3 regardless).
+      const res = await fetch(`${track.baseUrl}&fmt=vtt`, {
+        signal: withTimeout(),
+        headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" },
+      });
+      if (res.ok) {
+        const body = await res.text();
+        const parsed = parseVtt(body);
+        if (parsed.length) return parsed;
+        const xmlParsed = parseSrv3(body);
+        if (xmlParsed.length) return xmlParsed;
+      }
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error("all caption tracks failed");
+}
+
 /**
  * Fetch title/thumbnail server-side WITHOUT a YouTube API key,
  * using the public oEmbed endpoint. No CORS issues (server-to-server).
@@ -53,14 +222,21 @@ export async function fetchVideoDetails(videoId: string): Promise<VideoDetails> 
   return { title: `YouTube video ${videoId}`, thumbnail: thumbnailFor(videoId) };
 }
 
-/** Fetch captions server-side via youtube-transcript (no browser CORS). */
+/** Fetch captions server-side. Tries the scraper first, then InnerTube. */
 export async function fetchCaptions(videoId: string): Promise<CaptionItem[]> {
-  const raw = await YoutubeTranscript.fetchTranscript(videoId);
-  return raw.map((c) => ({
-    text: c.text ?? "",
-    offset: Number(c.offset ?? 0),
-    duration: Number(c.duration ?? 0),
-  }));
+  try {
+    const raw = await YoutubeTranscript.fetchTranscript(videoId);
+    const mapped = raw.map((c) => ({
+      text: c.text ?? "",
+      offset: Number(c.offset ?? 0),
+      duration: Number(c.duration ?? 0),
+    }));
+    if (mapped.length) return mapped;
+  } catch {
+    // fall through to InnerTube — the scraper is routinely bot-blocked
+    // on cloud IPs (works locally, fails on Vercel).
+  }
+  return fetchCaptionsInnerTube(videoId);
 }
 
 /** Full pipeline: captions + details + joined text. Throws with friendly message on failure. */
@@ -70,7 +246,7 @@ export async function extractTranscript(videoId: string): Promise<ExtractResult>
     captions = await fetchCaptions(videoId);
   } catch (err) {
     throw new Error(
-      "No captions found for this video. The video may have captions disabled, be private/age-restricted, or be a valid ID with no transcript track."
+      "No captions found for this video. The video may have captions disabled, be private/age-restricted, or YouTube may be rate-limiting the server — if a link works locally but not on the live site, wait a minute and try again."
     );
   }
   if (!captions.length) {
