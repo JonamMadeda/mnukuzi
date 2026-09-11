@@ -286,6 +286,68 @@ export async function fetchVideoDetails(videoId: string): Promise<VideoDetails> 
   return { title: `YouTube video ${videoId}`, thumbnail: thumbnailFor(videoId) };
 }
 
+/**
+ * Managed transcript API (Supadata). Used FIRST when SUPADATA_API_KEY is
+ * set — it runs on the provider's infrastructure, so it is unaffected by
+ * YouTube's bot-walling of our server IPs. Skipped when unconfigured.
+ * Docs: https://docs.supadata.ai — GET /v1/transcript?url=&lang=&mode=native
+ */
+async function fetchCaptionsSupadata(videoId: string): Promise<CaptionItem[]> {
+  const key = process.env.SUPADATA_API_KEY?.trim();
+  if (!key) throw new Error("no-key");
+  const url = canonicalWatchUrl(videoId);
+
+  const get = async (endpoint: string, timeoutMs: number) => {
+    const res = await fetch(endpoint, {
+      signal: AbortSignal.timeout(timeoutMs),
+      headers: { "x-api-key": key, "Content-Type": "application/json" },
+    });
+    if (res.status === 401 || res.status === 403) throw new Error("bad-api-key");
+    return res;
+  };
+
+  const toCaptions = (content: unknown): CaptionItem[] => {
+    if (!Array.isArray(content)) return [];
+    return content
+      .map((c) => {
+        const item = c as { text?: unknown; offset?: unknown; duration?: unknown };
+        return {
+          text: String(item.text ?? ""),
+          offset: Number(item.offset ?? 0),
+          duration: Number(item.duration ?? 0),
+        };
+      })
+      .filter((c) => c.text);
+  };
+
+  const first = await get(
+    `https://api.supadata.ai/v1/transcript?url=${encodeURIComponent(url)}&lang=en&mode=native`,
+    25000
+  );
+  if (first.status === 200) {
+    const done = toCaptions((await first.json())?.content);
+    if (done.length) return done;
+    throw new Error("empty-content");
+  }
+  if (first.status !== 202) throw new Error(`http=${first.status}`);
+  // Async job — poll briefly.
+  const jobId = (await first.json())?.jobId as string | undefined;
+  if (!jobId) throw new Error("no-job-id");
+  for (let i = 0; i < 6; i++) {
+    await new Promise((r) => setTimeout(r, 3000));
+    const poll = await get(`https://api.supadata.ai/v1/transcript/${jobId}`, 15000);
+    if (poll.status !== 200) continue;
+    const body = await poll.json();
+    if (body?.status === "failed" || body?.status === "error") {
+      throw new Error(`job-${body.status}`);
+    }
+    const done = toCaptions(body?.content);
+    if (done.length) return done;
+    if (!body?.jobId) break; // completed without content
+  }
+  throw new Error("job-timeout");
+}
+
 /** Fetch captions server-side. Tries scraper, InnerTube, then Piped mirrors. */
 export async function fetchCaptions(videoId: string): Promise<CaptionItem[]> {
   const diag: string[] = [];
@@ -303,6 +365,13 @@ export async function fetchCaptions(videoId: string): Promise<CaptionItem[]> {
       throw e;
     }
   };
+
+  try {
+    // Managed API first when configured — immune to IP bot-walls.
+    return await timed("supadata", () => fetchCaptionsSupadata(videoId));
+  } catch {
+    // Absent key ("no-key") or provider failure — fall through to free methods.
+  }
 
   try {
     const mapped = await timed("scraper", async () => {
